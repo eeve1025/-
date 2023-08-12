@@ -37,7 +37,7 @@ while soup.find_all('article',class_="b-block--top-bord job-list-item b-clearfix
   soup=bs4.BeautifulSoup(res.text)
   
 
-wb.save("104大數據職缺清單.xlsx")
+wb.save("104大數據職缺清單0812.xlsx")
 
 
 
