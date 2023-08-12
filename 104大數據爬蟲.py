@@ -31,7 +31,27 @@ while soup.find_all('article',class_="b-block--top-bord job-list-item b-clearfix
         e=job.find('div',class_="job-list-tag b-content").span.text
     else:
         e=job.find('div',class_="job-list-tag b-content").a.text
-    ws.append([a,b,c,d,e])
+
+        f=e[:2]
+        salary=''
+        for char in e:
+          if char.isdigit() or char=='~':
+            salary+=char
+
+        #薪水有範圍值，拆成上下限值
+        if '~' in salary:
+            #salary1=e[4]
+          low_price=salary[:salary.find('~')]
+          high_price=salary[salary.find('~')+1:]
+        else:
+          low_price=salary
+          high_price=salary 
+
+        #轉成數字格式
+        low_price=int(low_price)
+        high_price=int(high_price)
+
+    ws.append([a,b,c,d,e,f,low_price,high_price])
   page+=1
   res=requests.get('https://www.104.com.tw/jobs/search/?ro=0&kwop=7&keyword=%E5%A4%A7%E6%95%B8%E6%93%9A&expansionType=area%2Cspec%2Ccom%2Cjob%2Cwf%2Cwktm&order=12&asc=0&page='+str(page)+'&mode=s&jobsource=2018indexpoc&langFlag=0&langStatus=0&recommendJob=1&hotJob=1')
   soup=bs4.BeautifulSoup(res.text)
