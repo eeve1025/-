@@ -35,9 +35,7 @@ while soup.find_all('article',class_="b-block--top-bord job-list-item b-clearfix
   page+=1
   res=requests.get('https://www.104.com.tw/jobs/search/?ro=0&kwop=7&keyword=%E5%A4%A7%E6%95%B8%E6%93%9A&expansionType=area%2Cspec%2Ccom%2Cjob%2Cwf%2Cwktm&order=12&asc=0&page='+str(page)+'&mode=s&jobsource=2018indexpoc&langFlag=0&langStatus=0&recommendJob=1&hotJob=1')
   soup=bs4.BeautifulSoup(res.text)
-  
-
-wb.save("104大數據職缺清單0812.xlsx")
+  wb.save("104大數據職缺清單0812.xlsx")
 
 
 
