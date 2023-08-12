@@ -17,7 +17,7 @@ ws['E1']='薪資待遇'
 ws['F1']='給薪方式'
 ws['G1']='最低薪資'
 ws['H1']='最高薪資'
-
+   
 page=1
 while soup.find_all('article',class_="b-block--top-bord job-list-item b-clearfix js-job-item")!=[]:
   print("=======================")
