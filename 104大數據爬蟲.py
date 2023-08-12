@@ -14,6 +14,9 @@ ws['B1']='職缺連結'
 ws['C1']='公司名稱'
 ws['D1']='工作地區'
 ws['E1']='薪資待遇'
+ws['F1']='給薪方式'
+ws['G1']='最低薪資'
+ws['H1']='最高薪資'
 
 page=1
 while soup.find_all('article',class_="b-block--top-bord job-list-item b-clearfix js-job-item")!=[]:
@@ -29,6 +32,10 @@ while soup.find_all('article',class_="b-block--top-bord job-list-item b-clearfix
     d=job.select('ul')[1].li.text
     if  job.find('div',class_="job-list-tag b-content").select('span')!=[] and job.find('div',class_="job-list-tag b-content").span.text=="待遇面議":
         e=job.find('div',class_="job-list-tag b-content").span.text
+        f=''
+        high_price=''
+        low_price=''
+
     else:
         e=job.find('div',class_="job-list-tag b-content").a.text
 
