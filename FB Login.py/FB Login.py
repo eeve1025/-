@@ -9,3 +9,5 @@ driver.get("https://www.facebook.com")
 driver.find_element(By.CSS_SELECTOR,'input[name="email"]').send_keys("************@yahoo.com.tw")
 driver.find_element(By.CSS_SELECTOR,'input[name="pass"]').send_keys("***********")
 driver.find_element(By.CSS_SELECTOR,'button[name="login"]').click()
+
+
