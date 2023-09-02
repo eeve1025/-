@@ -1,294 +1,267 @@
-# -*- coding: utf-8 -*-
-# Copyright 2018-2019 Streamlit Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+from io import BytesIO
 
-# This demo lets you to explore the Udacity self-driving car image dataset.
-# More info: https://github.com/streamlit/demo-self-driving
-
-import streamlit as st
-import altair as alt
-import pandas as pd
 import numpy as np
-import os, urllib, cv2
+import PIL.Image
+import streamlit as st
+import tensorflow as tf
 
-# Streamlit encourages well-structured code, like starting execution in a main() function.
-def main():
-    # Render the readme as markdown using st.markdown.
-    readme_text = st.markdown(get_file_content_as_string("instructions.md"))
+"# Deep Dream :sleeping:"
 
-    # Download external dependencies.
-    for filename in EXTERNAL_DEPENDENCIES.keys():
-        download_file(filename)
 
-    # Once we have the dependencies, add a selector for the app mode on the sidebar.
-    st.sidebar.title("What to do")
-    app_mode = st.sidebar.selectbox("Choose the app mode",
-        ["Show instructions", "Run the app", "Show the source code"])
-    if app_mode == "Show instructions":
-        st.sidebar.success('To continue select "Run the app".')
-    elif app_mode == "Show the source code":
-        readme_text.empty()
-        st.code(get_file_content_as_string("streamlit_app.py"))
-    elif app_mode == "Run the app":
-        readme_text.empty()
-        run_the_app()
+def download(url, max_dim=None):
+    """Download an image from a URL and read it into a NumPy array."""
+    name = url.split("/")[-1]
+    image_path = tf.keras.utils.get_file(name, origin=url)
+    img = PIL.Image.open(image_path)
+    if max_dim:
+        img.thumbnail((max_dim, max_dim))
+    return np.array(img)
 
-# This file downloader demonstrates Streamlit animation.
-def download_file(file_path):
-    # Don't download the file twice. (If possible, verify the download using the file length.)
-    if os.path.exists(file_path):
-        if "size" not in EXTERNAL_DEPENDENCIES[file_path]:
-            return
-        elif os.path.getsize(file_path) == EXTERNAL_DEPENDENCIES[file_path]["size"]:
-            return
 
-    # These are handles to two visual elements to animate.
-    weights_warning, progress_bar = None, None
-    try:
-        weights_warning = st.warning("Downloading %s..." % file_path)
-        progress_bar = st.progress(0)
-        with open(file_path, "wb") as output_file:
-            with urllib.request.urlopen(EXTERNAL_DEPENDENCIES[file_path]["url"]) as response:
-                length = int(response.info()["Content-Length"])
-                counter = 0.0
-                MEGABYTES = 2.0 ** 20.0
-                while True:
-                    data = response.read(8192)
-                    if not data:
-                        break
-                    counter += len(data)
-                    output_file.write(data)
+def deprocess(img):
+    """Normalize an image"""
+    img = 255 * (img + 1.0) / 2.0
+    return tf.cast(img, tf.uint8)
 
-                    # We perform animation by overwriting the elements.
-                    weights_warning.warning("Downloading %s... (%6.2f/%6.2f MB)" %
-                        (file_path, counter / MEGABYTES, length / MEGABYTES))
-                    progress_bar.progress(min(counter / length, 1.0))
 
-    # Finally, we remove these visual elements by calling .empty().
-    finally:
-        if weights_warning is not None:
-            weights_warning.empty()
-        if progress_bar is not None:
-            progress_bar.empty()
+def img_to_bytes(img):
+    """Convert a PIL image to a byte array so users can download it"""
+    with BytesIO() as buf:
+        result.save(buf, format="PNG")
+        img_bytes = buf.getvalue()
+    return img_bytes
 
-# This is the main app app itself, which appears when the user selects "Run the app".
-def run_the_app():
-    # To make Streamlit fast, st.cache allows us to reuse computation across runs.
-    # In this common pattern, we download data from an endpoint only once.
-    @st.experimental_memo
-    def load_metadata(url):
-        return pd.read_csv(url)
 
-    # This function uses some Pandas magic to summarize the metadata Dataframe.
-    @st.experimental_memo
-    def create_summary(metadata):
-        one_hot_encoded = pd.get_dummies(metadata[["frame", "label"]], columns=["label"])
-        summary = one_hot_encoded.groupby(["frame"]).sum().rename(columns={
-            "label_biker": "biker",
-            "label_car": "car",
-            "label_pedestrian": "pedestrian",
-            "label_trafficLight": "traffic light",
-            "label_truck": "truck"
-        })
-        return summary
+def random_roll(img, maxroll):
+    """Randomly shift the image to avoid tiled boundaries."""
+    shift = tf.random.uniform(
+        shape=[2], minval=-maxroll, maxval=maxroll, dtype=tf.int32
+    )
+    img_rolled = tf.roll(img, shift=shift, axis=[0, 1])
+    return shift, img_rolled
 
-    # An amazing property of st.cached functions is that you can pipe them into
-    # one another to form a computation DAG (directed acyclic graph). Streamlit
-    # recomputes only whatever subset is required to get the right answer!
-    metadata = load_metadata(os.path.join(DATA_URL_ROOT, "labels.csv.gz"))
-    summary = create_summary(metadata)
 
-    # Uncomment these lines to peek at these DataFrames.
-    # st.write('## Metadata', metadata[:1000], '## Summary', summary[:1000])
+@st.cache_resource
+def load_base_model():
+    return tf.keras.applications.InceptionV3(include_top=False, weights="imagenet")
 
-    # Draw the UI elements to search for objects (pedestrians, cars, etc.)
-    selected_frame_index, selected_frame = frame_selector_ui(summary)
-    if selected_frame_index == None:
-        st.error("No frames fit the criteria. Please select different label or number.")
-        return
 
-    # Draw the UI element to select parameters for the YOLO object detector.
-    confidence_threshold, overlap_threshold = object_detector_ui()
+@st.cache_resource
+def load_all_layers(_model):
+    return {layer.name: layer.output for layer in _model.layers}
 
-    # Load the image from S3.
-    image_url = os.path.join(DATA_URL_ROOT, selected_frame)
-    image = load_image(image_url)
 
-    # Add boxes for objects on the image. These are the boxes for the ground image.
-    boxes = metadata[metadata.frame == selected_frame].drop(columns=["frame"])
-    draw_image_with_boxes(image, boxes, "Ground Truth",
-        "**Human-annotated data** (frame `%i`)" % selected_frame_index)
+def load_dream_model(base_model, layers):
+    return tf.keras.Model(inputs=base_model.input, outputs=layers)
 
-    # Get the boxes for the objects detected by YOLO by running the YOLO model.
-    yolo_boxes = yolo_v3(image, confidence_threshold, overlap_threshold)
-    draw_image_with_boxes(image, yolo_boxes, "Real-time Computer Vision",
-        "**YOLO v3 Model** (overlap `%3.1f`) (confidence `%3.1f`)" % (overlap_threshold, confidence_threshold))
 
-# This sidebar UI is a little search engine to find certain object types.
-def frame_selector_ui(summary):
-    st.sidebar.markdown("# Frame")
+def show(dg, img):
+    """Display an image."""
+    dg.image(PIL.Image.fromarray(np.array(img)), use_column_width=True)
+    return dg
 
-    # The user can pick which type of object to search for.
-    object_type = st.sidebar.selectbox("Search for which objects?", summary.columns, 2)
 
-    # The user can select a range for how many of the selected objecgt should be present.
-    min_elts, max_elts = st.sidebar.slider("How many %ss (select a range)?" % object_type, 0, 25, [10, 20])
-    selected_frames = get_selected_frames(summary, object_type, min_elts, max_elts)
-    if len(selected_frames) < 1:
-        return None, None
+# Below is the actual logic for this app. It's a bit messy because it's almost a
+# straight copy/paste from the original DeepDream example repo, which is also
+# messy:
+# https://github.com/tensorflow/docs/blob/9ae740ab7b5b3f9c32ca060332037b51d95674ae/site/en/tutorials/generative/deepdream.ipynb
 
-    # Choose a frame out of the selected frames.
-    selected_frame_index = st.sidebar.slider("Choose a frame (index)", 0, len(selected_frames) - 1, 0)
 
-    # Draw an altair chart in the sidebar with information on the frame.
-    objects_per_frame = summary.loc[selected_frames, object_type].reset_index(drop=True).reset_index()
-    chart = alt.Chart(objects_per_frame, height=120).mark_area().encode(
-        alt.X("index:Q", scale=alt.Scale(nice=False)),
-        alt.Y("%s:Q" % object_type))
-    selected_frame_df = pd.DataFrame({"selected_frame": [selected_frame_index]})
-    vline = alt.Chart(selected_frame_df).mark_rule(color="red").encode(x = "selected_frame")
-    st.sidebar.altair_chart(alt.layer(chart, vline))
+def calc_loss(img, model):
+    """Pass forward the image through the model to retrieve the activations."""
+    img_batch = tf.expand_dims(img, axis=0)
+    layer_activations = model(img_batch)
+    if len(layer_activations) == 1:
+        layer_activations = [layer_activations]
 
-    selected_frame = selected_frames[selected_frame_index]
-    return selected_frame_index, selected_frame
+    losses = []
+    for act in layer_activations:
+        loss = tf.math.reduce_mean(act)
+        losses.append(loss)
 
-# Select frames based on the selection in the sidebar
-@st.cache(hash_funcs={np.ufunc: str})
-def get_selected_frames(summary, label, min_elts, max_elts):
-    return summary[np.logical_and(summary[label] >= min_elts, summary[label] <= max_elts)].index
+    return tf.reduce_sum(losses)
 
-# This sidebar UI lets the user select parameters for the YOLO object detector.
-def object_detector_ui():
-    st.sidebar.markdown("# Model")
-    confidence_threshold = st.sidebar.slider("Confidence threshold", 0.0, 1.0, 0.5, 0.01)
-    overlap_threshold = st.sidebar.slider("Overlap threshold", 0.0, 1.0, 0.3, 0.01)
-    return confidence_threshold, overlap_threshold
 
-# Draws an image with boxes overlayed to indicate the presence of cars, pedestrians etc.
-def draw_image_with_boxes(image, boxes, header, description):
-    # Superpose the semi-transparent object detection boxes.    # Colors for the boxes
-    LABEL_COLORS = {
-        "car": [255, 0, 0],
-        "pedestrian": [0, 255, 0],
-        "truck": [0, 0, 255],
-        "trafficLight": [255, 255, 0],
-        "biker": [255, 0, 255],
-    }
-    image_with_boxes = image.astype(np.float64)
-    for _, (xmin, ymin, xmax, ymax, label) in boxes.iterrows():
-        image_with_boxes[int(ymin):int(ymax),int(xmin):int(xmax),:] += LABEL_COLORS[label]
-        image_with_boxes[int(ymin):int(ymax),int(xmin):int(xmax),:] /= 2
+class TiledGradients(tf.Module):
+    def __init__(self, model):
+        self.model = model
 
-    # Draw the header and image.
-    st.subheader(header)
-    st.markdown(description)
-    st.image(image_with_boxes.astype(np.uint8), use_column_width=True)
+    @tf.function(
+        input_signature=(
+            tf.TensorSpec(shape=[None, None, 3], dtype=tf.float32),
+            tf.TensorSpec(shape=[2], dtype=tf.int32),
+            tf.TensorSpec(shape=[], dtype=tf.int32),
+        )
+    )
+    def __call__(self, img, img_size, tile_size=512):
+        shift, img_rolled = random_roll(img, tile_size)
+        gradients = tf.zeros_like(img_rolled)
+        xs = tf.range(0, img_size[1], tile_size)[:-1]
+        if not tf.cast(len(xs), bool):
+            xs = tf.constant([0])
+        ys = tf.range(0, img_size[0], tile_size)[:-1]
+        if not tf.cast(len(ys), bool):
+            ys = tf.constant([0])
 
-# Download a single file and make its content available as a string.
-@st.experimental_singleton(show_spinner=False)
-def get_file_content_as_string(path):
-    url = 'https://raw.githubusercontent.com/streamlit/demo-self-driving/master/' + path
-    response = urllib.request.urlopen(url)
-    return response.read().decode("utf-8")
+        for x in xs:
+            for y in ys:
+                with tf.GradientTape() as tape:
+                    tape.watch(img_rolled)
+                    img_tile = img_rolled[y : y + tile_size, x : x + tile_size]
+                    loss = calc_loss(img_tile, self.model)
+                gradients = gradients + tape.gradient(loss, img_rolled)
 
-# This function loads an image from Streamlit public repo on S3. We use st.cache on this
-# function as well, so we can reuse the images across runs.
-@st.experimental_memo(show_spinner=False)
-def load_image(url):
-    with urllib.request.urlopen(url) as response:
-        image = np.asarray(bytearray(response.read()), dtype="uint8")
-    image = cv2.imdecode(image, cv2.IMREAD_COLOR)
-    image = image[:, :, [2, 1, 0]] # BGR -> RGB
-    return image
+        gradients = tf.roll(gradients, shift=-shift, axis=[0, 1])
+        gradients /= tf.math.reduce_std(gradients) + 1e-8
+        return gradients
 
-# Run the YOLO model to detect objects.
-def yolo_v3(image, confidence_threshold, overlap_threshold):
-    # Load the network. Because this is cached it will only happen once.
-    @st.cache(allow_output_mutation=True)
-    def load_network(config_path, weights_path):
-        net = cv2.dnn.readNetFromDarknet(config_path, weights_path)
-        output_layer_names = net.getLayerNames()
-        output_layer_names = [output_layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
-        return net, output_layer_names
-    net, output_layer_names = load_network("yolov3.cfg", "yolov3.weights")
 
-    # Run the YOLO neural net.
-    blob = cv2.dnn.blobFromImage(image, 1 / 255.0, (416, 416), swapRB=True, crop=False)
-    net.setInput(blob)
-    layer_outputs = net.forward(output_layer_names)
+def run_deep_dream_with_octaves(
+    img, steps_per_octave=100, step_size=0.01, octaves=range(-2, 3), octave_scale=1.3
+):
+    base_shape = tf.shape(img)
+    img = tf.keras.utils.img_to_array(img)
+    img = tf.keras.applications.inception_v3.preprocess_input(img)
 
-    # Supress detections in case of too low confidence or too much overlap.
-    boxes, confidences, class_IDs = [], [], []
-    H, W = image.shape[:2]
-    for output in layer_outputs:
-        for detection in output:
-            scores = detection[5:]
-            classID = np.argmax(scores)
-            confidence = scores[classID]
-            if confidence > confidence_threshold:
-                box = detection[0:4] * np.array([W, H, W, H])
-                centerX, centerY, width, height = box.astype("int")
-                x, y = int(centerX - (width / 2)), int(centerY - (height / 2))
-                boxes.append([x, y, int(width), int(height)])
-                confidences.append(float(confidence))
-                class_IDs.append(classID)
-    indices = cv2.dnn.NMSBoxes(boxes, confidences, confidence_threshold, overlap_threshold)
+    initial_shape = img.shape[:-1]
+    img = tf.image.resize(img, initial_shape)
 
-    # Map from YOLO labels to Udacity labels.
-    UDACITY_LABELS = {
-        0: 'pedestrian',
-        1: 'biker',
-        2: 'car',
-        3: 'biker',
-        5: 'truck',
-        7: 'truck',
-        9: 'trafficLight'
-    }
-    xmin, xmax, ymin, ymax, labels = [], [], [], [], []
-    if len(indices) > 0:
-        # loop over the indexes we are keeping
-        for i in indices.flatten():
-            label = UDACITY_LABELS.get(class_IDs[i], None)
-            if label is None:
-                continue
+    text_template = "Octave: %s\n\nStep: %s"
+    progress_widget = st.sidebar.progress(0)
+    p = 0.0
 
-            # extract the bounding box coordinates
-            x, y, w, h = boxes[i][0], boxes[i][1], boxes[i][2], boxes[i][3]
+    for octave in octaves:
+        new_size = tf.cast(tf.convert_to_tensor(base_shape[:-1]), tf.float32) * (
+            octave_scale**octave
+        )
+        new_size = tf.cast(new_size, tf.int32)
+        img = tf.image.resize(img, new_size)
+        for step in range(steps_per_octave):
+            gradients = get_tiled_gradients(img, new_size)
+            img = img + gradients * step_size
+            img = tf.clip_by_value(img, -1, 1)
+            p += 1
+            progress_widget.progress(
+                p / (steps_per_octave * len(octaves)),
+                text_template % (octave, step + 1),
+            )
+            if step % 10 == 0:
+                show(image_widget, deprocess(img))
+    result = PIL.Image.fromarray(np.array(deprocess(img)))
+    return result
 
-            xmin.append(x)
-            ymin.append(y)
-            xmax.append(x+w)
-            ymax.append(y+h)
-            labels.append(label)
 
-    boxes = pd.DataFrame({"xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax, "labels": labels})
-    return boxes[["xmin", "ymin", "xmax", "ymax", "labels"]]
+# Load and cache the base model and all layers
+base_model = load_base_model()
+all_layers = load_all_layers(base_model)
 
-# Path to the Streamlit public S3 bucket
-DATA_URL_ROOT = "https://streamlit-self-driving.s3-us-west-2.amazonaws.com/"
+st.sidebar.caption(
+    """This Streamlit app is based entirely on
+[TensorFlow's DeepDream tutorial](https://github.com/tensorflow/docs/blob/9ae740ab7b5b3f9c32ca060332037b51d95674ae/site/en/tutorials/generative/deepdream.ipynb)."""
+)
 
-# External files to download.
-EXTERNAL_DEPENDENCIES = {
-    "yolov3.weights": {
-        "url": "https://pjreddie.com/media/files/yolov3.weights",
-        "size": 248007048
-    },
-    "yolov3.cfg": {
-        "url": "https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg",
-        "size": 8342
-    }
+# Define a dictionary for image sources
+image_sources = {
+    "Specify image by URL...": None,
+    "Upload image from my machine...": None,
+    "Grace Hopper example": "https://storage.googleapis.com/download.tensorflow.org/example_images/grace_hopper.jpg",
+    "Red sunflower example": "https://storage.googleapis.com/download.tensorflow.org/example_images/592px-Red_sunflower.jpg",
+    "Yellow labrador example": "https://storage.googleapis.com/download.tensorflow.org/example_images/YellowLabradorLooking_new.jpg",
 }
 
-if __name__ == "__main__":
-    main()
+image_source = st.sidebar.selectbox(
+    "Input image",
+    list(image_sources.keys()),
+    help="""
+    Select an image to use as a starting point for Deep Dream.\n
+    Either enter a URL to an image on the web, upload an image
+    from your computer, or select one of the example images.""",
+)
+
+if image_source == "Specify image by URL...":
+    url = st.sidebar.text_input(
+        "Image URL",
+        image_sources["Yellow labrador example"],
+        help="The URL of the image to use as a starting point for Deep Dream.",
+    )
+    original_img = download(url, max_dim=500)
+
+elif image_source == "Upload image from my machine...":
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload your own image...",
+        type=["jpg", "png"],
+        help="Upload an image from your computer to use as a starting point for Deep Dream.\n\nUses the same image as the 'Yellow labrador example' if no image is uploaded.",
+    )
+    if uploaded_file is not None:
+        original_img = PIL.Image.open(uploaded_file)
+        original_img.thumbnail((500, 500))
+        original_img = np.array(original_img.copy())
+    else:
+        original_img = download(image_sources["Yellow labrador example"], max_dim=500)
+
+else:
+    original_img = download(image_sources[image_source], max_dim=500)
+
+octaves = st.sidebar.slider(
+    "Octaves",
+    min_value=-2,
+    max_value=3,
+    value=(-1, 0),
+    step=1,
+    help="The number of scales at which to run gradient ascent.",
+)
+steps_per_octave = st.sidebar.slider(
+    "Steps per Octave",
+    min_value=10,
+    max_value=100,
+    value=50,
+    step=10,
+    help="The number of gradient ascent steps to run at each octave.",
+)
+step_size = st.sidebar.slider(
+    "Step Size",
+    min_value=0.01,
+    max_value=0.1,
+    value=0.01,
+    step=0.01,
+    help="The step size for gradient ascent.",
+)
+
+names = st.sidebar.multiselect(
+    "Select layers to visualize",
+    list(all_layers.keys()),
+    default=["mixed3", "mixed5"],
+    help="""
+    For DeepDream, the layers of interest are those where the convolutions are concatenated. 
+    There are 11 of these layers in InceptionV3, named 'mixed0' though 'mixed10'. \n\n
+    Using different layers will result in different dream-like images. Deeper layers respond 
+    to higher-level features (such as eyes and faces), while earlier layers respond to simpler 
+    features (such as edges, shapes, and textures).
+    Source: [TensorFlow DeepDream](https://www.tensorflow.org/tutorials/generative/deepdream?hl=en#prepare_the_feature_extraction_model)""",
+)
+
+# Retrieve specific user-chosen layers from multiselect
+layers = [all_layers[name] for name in names]
+dream_model = load_dream_model(base_model, layers)
+get_tiled_gradients = TiledGradients(dream_model)
+
+st.subheader("Original Image")
+st.image(original_img, use_column_width=True)
+
+st.subheader("Deep Dream Image")
+image_widget = st.empty()
+result = run_deep_dream_with_octaves(
+    img=original_img,
+    steps_per_octave=steps_per_octave,
+    step_size=step_size,
+    octaves=octaves,
+)
+
+img_bytes = img_to_bytes(result)
+
+st.download_button(
+    label="Download Deep Dream Image",
+    data=img_bytes,
+    file_name="deep_dream.png",
+    mime="image/png",
+)
