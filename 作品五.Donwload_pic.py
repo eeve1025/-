@@ -1,3 +1,4 @@
+#google重頭開始搜尋到載入
 #開一個資料夾
 import os
 #path=os.getcwd()
