@@ -2,7 +2,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 
-services=Service(executable_path="C:\\Users\\user\\Desktop\\big_data\\chromedriver.exe")
+services=Service(executable_path="C:\\Users\\user\\Desktop\\chromedriver.exe")
 driver=webdriver.Chrome(service=services)
 driver.get("https://www.facebook.com")
 
