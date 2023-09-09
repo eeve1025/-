@@ -48,6 +48,8 @@ while soup.find("a",id="nextPage")["class"]!=["disabled"]:
     soup = BeautifulSoup(driver.page_source,"html.parser")
 
 
-
+for class_name in soup.find_all("td",style="text-align:left"):
+    a=class_name.a.text
+    print(a)
 
 
